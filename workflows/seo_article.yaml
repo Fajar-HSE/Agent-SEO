@@ -1,6 +1,6 @@
 name: seo_article_generation
-version: "1.0"
-description: "Generate SEO-optimized article from keyword"
+version: "1.1"
+description: "Full SEO article pipeline: keyword → research → plan → write → SEO → review → approval → publish → monitor"
 provider: huggingface
 model: Qwen/Qwen2.5-72B-Instruct
 
@@ -20,7 +20,7 @@ steps:
     description: "Research topic context and trends"
     input_mapping:
       keyword: "${input.keyword}"
-      outline: "${steps.keyword.primary_keyword}"
+      primary_keyword: "${steps.keyword.primary_keyword}"
     output_keys:
       - context
       - trends
@@ -46,6 +46,7 @@ steps:
       sections: "${steps.plan.sections}"
       keywords: "${steps.keyword}"
       context: "${steps.research.context}"
+      key_facts: "${steps.research.key_facts}"
     output_keys:
       - title
       - content
@@ -57,6 +58,7 @@ steps:
     input_mapping:
       content: "${steps.write.content}"
       title: "${steps.write.title}"
+      excerpt: "${steps.write.excerpt}"
       keywords: "${steps.keyword}"
     output_keys:
       - optimized_content
@@ -72,8 +74,52 @@ steps:
       title: "${steps.seo.meta_title}"
       seo_score: "${steps.seo.seo_score}"
       keyword: "${input.keyword}"
+      key_facts: "${steps.research.key_facts}"
     output_keys:
       - quality_score
       - approved
       - feedback
       - issues
+
+  - id: approval
+    agent: approval
+    description: "Human approval checkpoint before publishing"
+    input_mapping:
+      title: "${steps.seo.meta_title}"
+      optimized_content: "${steps.seo.optimized_content}"
+      quality_score: "${steps.review.quality_score}"
+      approved: "${steps.review.approved}"
+      feedback: "${steps.review.feedback}"
+      issues: "${steps.review.issues}"
+    output_keys:
+      - approved
+      - action
+      - reason
+
+  - id: publish
+    agent: publisher
+    description: "Publish approved article to WordPress"
+    input_mapping:
+      title: "${steps.seo.meta_title}"
+      content: "${steps.seo.optimized_content}"
+      excerpt: "${steps.write.excerpt}"
+      meta_title: "${steps.seo.meta_title}"
+      meta_description: "${steps.seo.meta_description}"
+      publish_status: "draft"
+    output_keys:
+      - published
+      - post_id
+      - url
+      - status
+
+  - id: monitor
+    agent: monitor
+    description: "Record workflow metrics and health report"
+    input_mapping:
+      workflow_id: "${input.workflow_id}"
+      steps_results: "${input.steps_results}"
+    output_keys:
+      - health
+      - total_tokens
+      - total_cost_usd
+      - avg_confidence

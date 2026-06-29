@@ -10,6 +10,8 @@ from agents.base import BaseAgent
 class WriterAgent(BaseAgent):
     """Writes full article based on outline, keywords, and context."""
 
+    prompt_name = "writer"
+
     async def run(self, input_data: dict[str, Any], llm_func) -> dict[str, Any]:
         messages = self._build_messages(input_data)
         raw = await llm_func(

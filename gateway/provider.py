@@ -15,6 +15,36 @@ from .logger import log_request
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Token / cost tracking helpers
+# ---------------------------------------------------------------------------
+
+def _estimate_tokens(text: str) -> int:
+    """Rough token estimate: ~4 chars per token."""
+    return max(1, len(text) // 4)
+
+
+# Per-model cost table (USD per 1k tokens).
+# Kept minimal — add more models as needed.
+_COST_PER_1K: dict[str, dict[str, float]] = {
+    # OpenRouter
+    "meta-llama/llama-3.1-70b-instruct": {"prompt": 0.001, "completion": 0.001},
+    "google/gemini-flash-1.5": {"prompt": 0.000075, "completion": 0.0003},
+    "mistralai/mistral-7b-instruct": {"prompt": 0.00007, "completion": 0.00007},
+    # HuggingFace (free tier → 0 cost)
+    "Qwen/Qwen2.5-72B-Instruct": {"prompt": 0.0, "completion": 0.0},
+    # Ollama (local → 0 cost)
+    "llama3.1:8b": {"prompt": 0.0, "completion": 0.0},
+}
+
+
+def estimate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
+    """Return estimated USD cost for a request."""
+    rates = _COST_PER_1K.get(model, {"prompt": 0.0, "completion": 0.0})
+    cost = (prompt_tokens / 1000) * rates["prompt"] + (completion_tokens / 1000) * rates["completion"]
+    return round(cost, 6)
+
+
 class Provider(ABC):
     """Base class for all LLM providers."""
 
@@ -27,6 +57,9 @@ class Provider(ABC):
         self.timeout = config.get("timeout", 60.0)
         self.models = config.get("models", {})
         self.default_model = config.get("default_model", "")
+        # Token & cost accumulators (reset per session if needed)
+        self.total_tokens: int = 0
+        self.total_cost_usd: float = 0.0
 
     def _get_api_key(self) -> str:
         """Get API key from environment variable."""
@@ -36,6 +69,17 @@ class Provider(ABC):
                 raise ValueError(f"Missing env var: {self.api_key_env}")
             return key
         return ""
+
+    def _track_usage(self, model: str, prompt_text: str, completion_text: str):
+        """Track token usage and estimate cost."""
+        pt = _estimate_tokens(prompt_text)
+        ct = _estimate_tokens(completion_text)
+        self.total_tokens += pt + ct
+        self.total_cost_usd += estimate_cost(model, pt, ct)
+        logger.debug(
+            f"[{self.name}] tokens: +{pt+ct} (total={self.total_tokens}), "
+            f"cost: +${estimate_cost(model, pt, ct):.6f} (total=${self.total_cost_usd:.6f})"
+        )
 
     @abstractmethod
     async def complete(
@@ -94,8 +138,14 @@ class HuggingFaceProvider(Provider):
         data = await self._post(url, payload, headers)
 
         if isinstance(data, list) and data:
-            return data[0].get("generated_text", "")
-        return str(data)
+            text = data[0].get("generated_text", "")
+        else:
+            text = str(data)
+
+        # Track usage
+        prompt_text = "\n".join(m["content"] for m in messages)
+        self._track_usage(model, prompt_text, text)
+        return text
 
 
 class OllamaProvider(Provider):
@@ -127,4 +177,62 @@ class OllamaProvider(Provider):
             },
         }
         data = await self._post(url, payload)
-        return data.get("message", {}).get("content", "")
+        text = data.get("message", {}).get("content", "")
+        prompt_text = "\n".join(m["content"] for m in messages)
+        self._track_usage(model, prompt_text, text)
+        return text
+
+
+class OpenRouterProvider(Provider):
+    """OpenRouter — multi-model gateway, supports free and paid models."""
+
+    name = "openrouter"
+
+    def __init__(self, config: dict[str, Any]):
+        super().__init__(config)
+        self.base_url = self.base_url or "https://openrouter.ai/api/v1"
+        self.site_url = config.get("site_url", "")
+        self.site_name = config.get("site_name", "SEO Agent")
+
+    async def complete(
+        self,
+        messages: list[dict[str, str]],
+        model: str = "",
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+    ) -> str:
+        model = model or self.default_model or "meta-llama/llama-3.1-70b-instruct:free"
+        api_key = self._get_api_key()
+        url = f"{self.base_url}/chat/completions"
+
+        headers: dict[str, str] = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        if self.site_url:
+            headers["HTTP-Referer"] = self.site_url
+        if self.site_name:
+            headers["X-Title"] = self.site_name
+
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+
+        data = await self._post(url, payload, headers)
+        choices = data.get("choices", [])
+        if not choices:
+            return ""
+
+        text = choices[0].get("message", {}).get("content", "")
+
+        # Use actual token counts from response if available
+        usage = data.get("usage", {})
+        pt = usage.get("prompt_tokens", _estimate_tokens("\n".join(m["content"] for m in messages)))
+        ct = usage.get("completion_tokens", _estimate_tokens(text))
+        self.total_tokens += pt + ct
+        self.total_cost_usd += estimate_cost(model, pt, ct)
+
+        return text

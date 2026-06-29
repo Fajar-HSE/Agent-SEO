@@ -1,0 +1,8 @@
+name: monitor
+provider: ""
+model: ""
+prompt_file: prompts/monitor.txt
+temperature: 0.2
+max_tokens: 1024
+output_format: json
+confidence_threshold: 0.5

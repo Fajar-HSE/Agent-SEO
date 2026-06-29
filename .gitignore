@@ -10,3 +10,20 @@ build/
 *.log
 logs/
 .cache/
+
+# Environment & secrets
+.env
+*.env
+
+# Cache directory
+cache/
+
+# Long-term memory (contains history data)
+config/longterm_memory.json
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db

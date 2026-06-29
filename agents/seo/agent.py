@@ -10,6 +10,8 @@ from agents.base import BaseAgent
 class SEOAgent(BaseAgent):
     """Optimizes article: meta tags, keyword density, readability, structure."""
 
+    prompt_name = "seo"
+
     async def run(self, input_data: dict[str, Any], llm_func) -> dict[str, Any]:
         messages = self._build_messages(input_data)
         raw = await llm_func(

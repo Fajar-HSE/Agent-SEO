@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from .provider import Provider, HuggingFaceProvider, OllamaProvider
+from .provider import Provider, HuggingFaceProvider, OllamaProvider, OpenRouterProvider
 from .retry import retry_call
 from .limiter import RateLimiter
 from .cache import Cache
@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 PROVIDERS: dict[str, type[Provider]] = {
     "huggingface": HuggingFaceProvider,
     "ollama": OllamaProvider,
+    "openrouter": OpenRouterProvider,
 }
 
 
@@ -91,3 +92,20 @@ class Router:
                 continue
 
         raise RuntimeError(f"All providers failed. Last error: {last_error}")
+
+    def get_usage_summary(self) -> dict:
+        """Return aggregated token usage and cost across all providers."""
+        total_tokens = sum(p.total_tokens for p in self.providers.values())
+        total_cost = sum(p.total_cost_usd for p in self.providers.values())
+        per_provider = {
+            name: {
+                "total_tokens": prov.total_tokens,
+                "total_cost_usd": round(prov.total_cost_usd, 6),
+            }
+            for name, prov in self.providers.items()
+        }
+        return {
+            "total_tokens": total_tokens,
+            "total_cost_usd": round(total_cost, 6),
+            "per_provider": per_provider,
+        }

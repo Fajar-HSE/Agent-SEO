@@ -10,6 +10,8 @@ from agents.base import BaseAgent
 class ResearchAgent(BaseAgent):
     """Researches topic context, trends, and supporting information."""
 
+    prompt_name = "research"
+
     async def run(self, input_data: dict[str, Any], llm_func) -> dict[str, Any]:
         messages = self._build_messages(input_data)
         raw = await llm_func(

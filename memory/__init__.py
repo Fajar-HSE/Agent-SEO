@@ -2,5 +2,6 @@
 
 from .session import SessionMemory
 from .project import ProjectMemory
+from .longterm import LongTermMemory
 
-__all__ = ["SessionMemory", "ProjectMemory"]
+__all__ = ["SessionMemory", "ProjectMemory", "LongTermMemory"]

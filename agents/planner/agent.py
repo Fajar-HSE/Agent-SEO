@@ -10,6 +10,8 @@ from agents.base import BaseAgent
 class PlannerAgent(BaseAgent):
     """Creates article outline: sections, key points, target length."""
 
+    prompt_name = "planner"
+
     async def run(self, input_data: dict[str, Any], llm_func) -> dict[str, Any]:
         messages = self._build_messages(input_data)
         raw = await llm_func(

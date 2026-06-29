@@ -9,6 +9,19 @@ providers:
       default: Qwen/Qwen2.5-72B-Instruct
       fast: Qwen/Qwen2.5-7B-Instruct
 
+  openrouter:
+    name: openrouter
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    default_model: meta-llama/llama-3.1-70b-instruct:free
+    site_url: ""
+    site_name: SEO Agent
+    timeout: 90.0
+    models:
+      default: meta-llama/llama-3.1-70b-instruct:free
+      fast: google/gemini-flash-1.5
+      quality: anthropic/claude-3-haiku
+
   ollama:
     name: ollama
     base_url: http://localhost:11434
@@ -18,8 +31,10 @@ providers:
       default: llama3.1:8b
       fast: llama3.1:8b
 
+# Provider fallback chain — tried in order when primary fails
 fallback_order:
   - huggingface
+  - openrouter
   - ollama
 
 cache:

@@ -19,6 +19,13 @@ if sys.platform == "win32":
 
 import yaml
 
+# Load .env file if present
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed, use system env vars
+
 # Setup paths
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
@@ -31,6 +38,7 @@ from agents.writer.agent import WriterAgent
 from agents.reviewer.agent import ReviewerAgent
 from agents.publisher.agent import PublisherAgent
 from agents.monitor.agent import MonitorAgent
+from agents.approval.agent import ApprovalAgent
 from gateway.router import Router
 from memory.session import SessionMemory
 from memory.project import ProjectMemory
@@ -48,6 +56,7 @@ AGENTS = {
     "reviewer": ReviewerAgent,
     "publisher": PublisherAgent,
     "monitor": MonitorAgent,
+    "approval": ApprovalAgent,
 }
 
 
@@ -174,6 +183,11 @@ async def run_workflow(
 
             logger.info(f"  ✓ Completed in {elapsed:.1f}s — confidence: {result.get('confidence', 0):.2f}")
 
+            # If approval step rejected — stop the workflow
+            if agent_name == "approval" and not result.get("approved", True):
+                logger.warning(f"  ✗ Workflow stopped: approval rejected — {result.get('reason', '')}")
+                break
+
         except Exception as e:
             elapsed = time.time() - start
             logger.error(f"  ✗ Failed in {elapsed:.1f}s: {e}")
@@ -195,6 +209,9 @@ async def run_workflow(
     completed = sum(1 for s in steps_results if s.get("status") == "completed")
     failed = sum(1 for s in steps_results if s.get("status") == "failed")
 
+    # Get token/cost usage from router
+    usage = router.get_usage_summary()
+
     summary = {
         "workflow_id": workflow_id,
         "workflow": wf_name,
@@ -202,11 +219,16 @@ async def run_workflow(
         "steps_total": len(steps),
         "steps_completed": completed,
         "steps_failed": failed,
+        "total_tokens": usage["total_tokens"],
+        "total_cost_usd": usage["total_cost_usd"],
         "steps": steps_results,
         "final_output": step_outputs,
     }
 
-    logger.info(f"Workflow finished: {completed}/{len(steps)} completed, {failed} failed")
+    logger.info(
+        f"Workflow finished: {completed}/{len(steps)} completed, {failed} failed | "
+        f"tokens={usage['total_tokens']}, cost=${usage['total_cost_usd']:.6f}"
+    )
     return summary
 
 

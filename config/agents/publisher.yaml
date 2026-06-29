@@ -1,0 +1,8 @@
+name: publisher
+provider: huggingface
+model: ""
+prompt_file: prompts/publisher.txt
+temperature: 0.2
+max_tokens: 1024
+output_format: json
+confidence_threshold: 0.8

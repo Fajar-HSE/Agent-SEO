@@ -1,0 +1,8 @@
+name: research
+provider: huggingface
+model: Qwen/Qwen2.5-72B-Instruct
+prompt_file: prompts/research.txt
+temperature: 0.4
+max_tokens: 3000
+output_format: json
+confidence_threshold: 0.6

@@ -1,0 +1,8 @@
+name: seo
+provider: huggingface
+model: Qwen/Qwen2.5-72B-Instruct
+prompt_file: prompts/seo.txt
+temperature: 0.3
+max_tokens: 4096
+output_format: json
+confidence_threshold: 0.6

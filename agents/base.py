@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -11,6 +12,9 @@ import yaml
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+
+# Root directory for resolving prompt paths
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class AgentConfig(BaseModel):
@@ -27,31 +31,64 @@ class AgentConfig(BaseModel):
 class BaseAgent(ABC):
     """Base class for all agents."""
 
+    # Subclasses can set this to auto-load the matching prompt file.
+    # e.g.  prompt_name = "keyword"  → loads prompts/keyword.txt
+    prompt_name: str = ""
+
     def __init__(self, config_path: str | None = None):
         self.config = self._load_config(config_path)
         self.prompt_template = self._load_prompt()
+        # Lazy-import security guards to avoid circular deps
+        self._input_guard = None
+        self._output_guard = None
+
+    # ------------------------------------------------------------------
+    # Config & prompt loading
+    # ------------------------------------------------------------------
 
     def _load_config(self, config_path: str | None) -> AgentConfig:
-        """Load agent config from YAML."""
-        if config_path:
+        """Load agent config from YAML, or use sensible defaults."""
+        if config_path and os.path.exists(config_path):
             with open(config_path, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f)
             return AgentConfig(**data)
-        return AgentConfig(name=self.__class__.__name__)
+        return AgentConfig(name=self.prompt_name or self.__class__.__name__)
 
     def _load_prompt(self) -> str:
-        """Load prompt template from file."""
+        """
+        Load prompt template.
+        Priority:
+        1. config.prompt_file (explicit path)
+        2. prompts/<prompt_name>.txt (convention-based, using class prompt_name)
+        3. Empty string (fall back to generic system message)
+        """
+        # 1. Explicit path from config
         if self.config.prompt_file:
+            path = self.config.prompt_file
+            if not os.path.isabs(path):
+                path = os.path.join(_ROOT, path)
             try:
-                with open(self.config.prompt_file, "r", encoding="utf-8") as f:
+                with open(path, "r", encoding="utf-8") as f:
                     return f.read()
             except FileNotFoundError:
-                logger.warning(f"Prompt file not found: {self.config.prompt_file}")
+                logger.warning(f"Prompt file not found: {path}")
+
+        # 2. Convention-based: prompts/<name>.txt
+        name = self.prompt_name or (self.config.name.lower())
+        convention_path = os.path.join(_ROOT, "prompts", f"{name}.txt")
+        if os.path.exists(convention_path):
+            with open(convention_path, "r", encoding="utf-8") as f:
+                return f.read()
+
         return ""
+
+    # ------------------------------------------------------------------
+    # Input / output helpers
+    # ------------------------------------------------------------------
 
     def _build_messages(self, input_data: dict[str, Any]) -> list[dict[str, str]]:
         """Build LLM messages from input data + prompt template."""
-        system_msg = self.prompt_template or f"You are {self.config.name}."
+        system_msg = self.prompt_template or f"You are {self.config.name}. Always respond with valid JSON."
         user_content = json.dumps(input_data, ensure_ascii=False, indent=2)
         return [
             {"role": "system", "content": system_msg},
@@ -60,26 +97,81 @@ class BaseAgent(ABC):
 
     def _parse_output(self, raw: str) -> dict[str, Any]:
         """Parse LLM output — try JSON first, fallback to raw text."""
+        raw = raw.strip() if raw else ""
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
-            # Try extracting JSON from markdown code block
-            if "```json" in raw:
-                start = raw.index("```json") + 7
-                end = raw.index("```", start)
-                return json.loads(raw[start:end])
-            return {"raw_text": raw, "confidence": 0.3}
+            pass
+
+        # Try extracting JSON from markdown code block
+        import re
+        match = re.search(r"```(?:json)?\s*([\s\S]+?)```", raw)
+        if match:
+            try:
+                return json.loads(match.group(1).strip())
+            except json.JSONDecodeError:
+                pass
+
+        # Last resort: return raw text with low confidence
+        return {"raw_text": raw, "confidence": 0.3}
 
     def _calculate_confidence(self, output: dict[str, Any]) -> float:
         """Extract or calculate confidence score."""
         if "confidence" in output:
-            return float(output["confidence"])
+            return max(0.0, min(1.0, float(output["confidence"])))
         # Heuristic: more structured output = higher confidence
         if output.get("title") and output.get("content"):
             return 0.8
         if output.get("outline") or output.get("keywords"):
             return 0.7
+        if "raw_text" in output:
+            return 0.3
         return 0.5
+
+    # ------------------------------------------------------------------
+    # Security helpers
+    # ------------------------------------------------------------------
+
+    def _get_input_guard(self):
+        if self._input_guard is None:
+            try:
+                from security.input_guard import InputGuard
+                self._input_guard = InputGuard()
+            except ImportError:
+                self._input_guard = False  # Security module not available
+        return self._input_guard if self._input_guard is not False else None
+
+    def _get_output_guard(self):
+        if self._output_guard is None:
+            try:
+                from security.output_guard import OutputGuard
+                self._output_guard = OutputGuard()
+            except ImportError:
+                self._output_guard = False
+        return self._output_guard if self._output_guard is not False else None
+
+    def _check_input(self, input_data: dict[str, Any]):
+        """Run input security checks. Raises ValueError if input is unsafe."""
+        guard = self._get_input_guard()
+        if guard is None:
+            return
+        ok, reason = guard.validate_dict(input_data)
+        if not ok:
+            raise ValueError(f"[Security] Input rejected: {reason}")
+
+    def _check_output(self, output: dict[str, Any]) -> list[str]:
+        """Run output security checks. Returns warnings (non-blocking)."""
+        guard = self._get_output_guard()
+        if guard is None:
+            return []
+        _, warnings = guard.validate_output(output)
+        for w in warnings:
+            logger.warning(f"[Security] {w}")
+        return warnings
+
+    # ------------------------------------------------------------------
+    # Abstract / public interface
+    # ------------------------------------------------------------------
 
     @abstractmethod
     async def run(self, input_data: dict[str, Any], llm_func) -> dict[str, Any]:
@@ -87,12 +179,22 @@ class BaseAgent(ABC):
         ...
 
     async def execute(self, input_data: dict[str, Any], llm_func) -> dict[str, Any]:
-        """Public execution method with logging."""
+        """Public execution method with security checks and logging."""
         logger.info(f"[{self.config.name}] Starting with keys: {list(input_data.keys())}")
+
+        # Security: validate input
+        self._check_input(input_data)
+
         try:
             result = await self.run(input_data, llm_func)
             confidence = self._calculate_confidence(result)
             result["confidence"] = confidence
+
+            # Security: check output
+            warnings = self._check_output(result)
+            if warnings:
+                result["_warnings"] = warnings
+
             logger.info(f"[{self.config.name}] Completed — confidence: {confidence:.2f}")
             return result
         except Exception as e:

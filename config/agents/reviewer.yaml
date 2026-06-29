@@ -1,0 +1,8 @@
+name: reviewer
+provider: huggingface
+model: Qwen/Qwen2.5-72B-Instruct
+prompt_file: prompts/reviewer.txt
+temperature: 0.3
+max_tokens: 2048
+output_format: json
+confidence_threshold: 0.7

@@ -1,0 +1,8 @@
+name: planner
+provider: huggingface
+model: Qwen/Qwen2.5-72B-Instruct
+prompt_file: prompts/planner.txt
+temperature: 0.5
+max_tokens: 2048
+output_format: json
+confidence_threshold: 0.6
