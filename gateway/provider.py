@@ -104,13 +104,17 @@ class Provider(ABC):
 
 
 class HuggingFaceProvider(Provider):
-    """HuggingFace Inference API — free tier friendly."""
+    """
+    HuggingFace Router — OpenAI-compatible endpoint via router.huggingface.co.
+    Supports 100+ models with free tier access.
+    """
 
     name = "huggingface"
 
     def __init__(self, config: dict[str, Any]):
         super().__init__(config)
-        self.base_url = self.base_url or "https://api-inference.huggingface.co/models"
+        # Use the new router endpoint (OpenAI-compatible)
+        self.base_url = "https://router.huggingface.co/v1"
 
     async def complete(
         self,
@@ -119,32 +123,35 @@ class HuggingFaceProvider(Provider):
         temperature: float = 0.7,
         max_tokens: int = 4096,
     ) -> str:
-        model = model or self.default_model or "Qwen/Qwen2.5-72B-Instruct"
+        model = model or self.default_model or "meta-llama/Llama-3.1-8B-Instruct"
         api_key = self._get_api_key()
-        url = f"{self.base_url}/{model}"
-        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-
-        # Convert messages to prompt format
-        prompt = "\n".join(f"{m['role']}: {m['content']}" for m in messages)
+        url = f"{self.base_url}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
 
         payload = {
-            "inputs": prompt,
-            "parameters": {
-                "temperature": temperature,
-                "max_new_tokens": max_tokens,
-                "return_full_text": False,
-            },
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": False,
         }
         data = await self._post(url, payload, headers)
 
-        if isinstance(data, list) and data:
-            text = data[0].get("generated_text", "")
-        else:
-            text = str(data)
+        choices = data.get("choices", [])
+        text = ""
+        if choices:
+            text = choices[0].get("message", {}).get("content") or ""
 
-        # Track usage
-        prompt_text = "\n".join(m["content"] for m in messages)
-        self._track_usage(model, prompt_text, text)
+        # Track usage (use actual tokens if available)
+        usage = data.get("usage", {})
+        pt = usage.get("prompt_tokens", _estimate_tokens("\n".join(m["content"] for m in messages)))
+        ct = usage.get("completion_tokens", _estimate_tokens(text))
+        self.total_tokens += pt + ct
+        self.total_cost_usd += estimate_cost(model, pt, ct)
+
         return text
 
 

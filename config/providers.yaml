@@ -1,24 +1,30 @@
 providers:
   huggingface:
     name: huggingface
-    base_url: https://api-inference.huggingface.co/models
+    base_url: https://router.huggingface.co/v1
     api_key_env: HF_API_TOKEN
-    default_model: Qwen/Qwen2.5-72B-Instruct
-    timeout: 60.0
+    # Model yang terbukti bekerja dengan HF free tier:
+    # meta-llama/Llama-3.1-8B-Instruct
+    # Qwen/Qwen2.5-7B-Instruct
+    # google/gemma-3-12b-it
+    # microsoft/phi-4
+    default_model: Qwen/Qwen2.5-7B-Instruct
+    timeout: 90.0
     models:
-      default: Qwen/Qwen2.5-72B-Instruct
-      fast: Qwen/Qwen2.5-7B-Instruct
+      default: Qwen/Qwen2.5-7B-Instruct
+      fast: google/gemma-3-4b-it
+      quality: meta-llama/Llama-3.1-8B-Instruct
 
   openrouter:
     name: openrouter
     base_url: https://openrouter.ai/api/v1
     api_key_env: OPENROUTER_API_KEY
-    default_model: meta-llama/llama-3.1-70b-instruct:free
+    default_model: meta-llama/llama-3.1-8b-instruct:free
     site_url: ""
     site_name: SEO Agent
     timeout: 90.0
     models:
-      default: meta-llama/llama-3.1-70b-instruct:free
+      default: meta-llama/llama-3.1-8b-instruct:free
       fast: google/gemini-flash-1.5
       quality: anthropic/claude-3-haiku
 
@@ -31,7 +37,7 @@ providers:
       default: llama3.1:8b
       fast: llama3.1:8b
 
-# Provider fallback chain — tried in order when primary fails
+# Provider fallback chain
 fallback_order:
   - huggingface
   - openrouter

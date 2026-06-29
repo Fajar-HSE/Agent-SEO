@@ -14,15 +14,16 @@ workflow:
 # Agent defaults
 agents:
   default_provider: huggingface
-  default_model: Qwen/Qwen2.5-72B-Instruct
+  default_model: Qwen/Qwen2.5-7B-Instruct
   temperature: 0.7
   max_tokens: 4096
   confidence_threshold: 0.6
+  language: id
 
 # Security settings
 security:
   check_injection: true
-  max_input_length: 8000
+  max_input_length: 32000
   require_approval_above: 0.95
 
 # Paths

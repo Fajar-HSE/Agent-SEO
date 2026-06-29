@@ -88,8 +88,24 @@ class BaseAgent(ABC):
 
     def _build_messages(self, input_data: dict[str, Any]) -> list[dict[str, str]]:
         """Build LLM messages from input data + prompt template."""
-        system_msg = self.prompt_template or f"You are {self.config.name}. Always respond with valid JSON."
-        user_content = json.dumps(input_data, ensure_ascii=False, indent=2)
+        system_msg = self.prompt_template or (
+            f"Kamu adalah {self.config.name}. "
+            "Selalu balas dalam Bahasa Indonesia. "
+            "Selalu balas dengan JSON yang valid."
+        )
+        # Always remind model to use Indonesian if not already in prompt
+        if "BAHASA OUTPUT" not in system_msg and "Bahasa Indonesia" not in system_msg:
+            system_msg = (
+                "PENTING: Seluruh output WAJIB dalam Bahasa Indonesia.\n\n"
+                + system_msg
+            )
+
+        # Inject language hint into input data
+        enriched = dict(input_data)
+        if "language" not in enriched:
+            enriched["language"] = "id"
+
+        user_content = json.dumps(enriched, ensure_ascii=False, indent=2)
         return [
             {"role": "system", "content": system_msg},
             {"role": "user", "content": user_content},
@@ -98,17 +114,36 @@ class BaseAgent(ABC):
     def _parse_output(self, raw: str) -> dict[str, Any]:
         """Parse LLM output — try JSON first, fallback to raw text."""
         raw = raw.strip() if raw else ""
+        
+        # Direct JSON parse
         try:
-            return json.loads(raw)
+            result = json.loads(raw)
+            # If a string value itself contains JSON (nested), parse it too
+            if isinstance(result, dict):
+                for k, v in result.items():
+                    if isinstance(v, str) and v.strip().startswith("{"):
+                        try:
+                            result[k] = json.loads(v)
+                        except Exception:
+                            pass
+            return result
         except json.JSONDecodeError:
             pass
 
-        # Try extracting JSON from markdown code block
+        # Try extracting JSON from markdown code block ```json ... ```
         import re
         match = re.search(r"```(?:json)?\s*([\s\S]+?)```", raw)
         if match:
             try:
                 return json.loads(match.group(1).strip())
+            except json.JSONDecodeError:
+                pass
+
+        # Try finding first { ... } block in text
+        match = re.search(r"\{[\s\S]+\}", raw)
+        if match:
+            try:
+                return json.loads(match.group(0))
             except json.JSONDecodeError:
                 pass
 

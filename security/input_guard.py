@@ -9,7 +9,7 @@ from typing import Any
 class InputGuard:
     """Validates and sanitizes agent inputs before sending to LLM."""
 
-    MAX_INPUT_LENGTH = 8000
+    MAX_INPUT_LENGTH = 32000  # cukup untuk artikel panjang (~8000 tokens)
 
     # Prompt injection patterns
     INJECTION_PATTERNS = [
@@ -38,8 +38,9 @@ class InputGuard:
         Validate input text.
         Returns (is_safe, reason). is_safe=True means input is acceptable.
         """
+        # Allow empty/None values — agents may receive empty fields
         if not text or not text.strip():
-            return False, "Empty input"
+            return True, ""
 
         if len(text) > self.max_input_length:
             return False, f"Input too long: {len(text)} chars > {self.max_input_length} limit"

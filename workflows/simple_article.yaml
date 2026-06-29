@@ -2,7 +2,7 @@ name: simple_article
 version: "1.0"
 description: "Quick article generation - keyword to write to review"
 provider: huggingface
-model: Qwen/Qwen2.5-72B-Instruct
+model: Qwen/Qwen2.5-7B-Instruct
 
 steps:
   - id: plan

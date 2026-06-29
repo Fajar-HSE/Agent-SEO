@@ -1,0 +1,99 @@
+name: rewrite_article
+version: "1.0"
+description: "AEO/GEO rewrite pipeline: fetch URL → diagnose → rewrite → SEO optimize → review → publish"
+provider: huggingface
+model: Qwen/Qwen2.5-7B-Instruct
+
+steps:
+  - id: fetch
+    agent: fetcher
+    description: "Fetch and extract content from source article URL"
+    input_mapping:
+      keyword: "${input.keyword}"
+      source_url: "${input.keyword}"
+    output_keys:
+      - url
+      - title
+      - content
+      - headings
+      - word_count
+
+  - id: rewrite
+    agent: rewriter
+    description: "Rewrite article with AEO/GEO/E-E-A-T Non-Commodity Framework"
+    input_mapping:
+      source_url: "${steps.fetch.url}"
+      source_title: "${steps.fetch.title}"
+      source_content: "${steps.fetch.content}"
+      source_headings: "${steps.fetch.headings}"
+      target_keyword: "${input.target_keyword}"
+      extra_context: "${input.extra_context}"
+      language: "${input.language}"
+    output_keys:
+      - title
+      - content
+      - meta_description
+      - slug
+      - focus_keyword
+      - seo_metadata
+      - internal_links
+      - diagnosis
+      - word_count
+      - excerpt
+
+  - id: review
+    agent: reviewer
+    description: "Quality check the rewritten article"
+    input_mapping:
+      content: "${steps.rewrite.content}"
+      title: "${steps.rewrite.title}"
+      keyword: "${steps.rewrite.focus_keyword}"
+      seo_score: "${steps.rewrite.seo_metadata}"
+    output_keys:
+      - quality_score
+      - approved
+      - feedback
+      - issues
+      - suggestions
+
+  - id: approval
+    agent: approval
+    description: "Human approval before publishing"
+    input_mapping:
+      title: "${steps.rewrite.title}"
+      optimized_content: "${steps.rewrite.content}"
+      quality_score: "${steps.review.quality_score}"
+      approved: "${steps.review.approved}"
+      feedback: "${steps.review.feedback}"
+      issues: "${steps.review.issues}"
+    output_keys:
+      - approved
+      - action
+      - reason
+
+  - id: publish
+    agent: publisher
+    description: "Publish approved rewrite to WordPress as draft"
+    input_mapping:
+      title: "${steps.rewrite.title}"
+      content: "${steps.rewrite.content}"
+      excerpt: "${steps.rewrite.excerpt}"
+      meta_title: "${steps.rewrite.seo_metadata}"
+      meta_description: "${steps.rewrite.meta_description}"
+      publish_status: "draft"
+    output_keys:
+      - published
+      - post_id
+      - url
+      - status
+
+  - id: monitor
+    agent: monitor
+    description: "Record rewrite workflow metrics"
+    input_mapping:
+      workflow_id: "${input.workflow_id}"
+      steps_results: "${input.steps_results}"
+    output_keys:
+      - health
+      - total_tokens
+      - avg_confidence

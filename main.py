@@ -39,6 +39,8 @@ from agents.reviewer.agent import ReviewerAgent
 from agents.publisher.agent import PublisherAgent
 from agents.monitor.agent import MonitorAgent
 from agents.approval.agent import ApprovalAgent
+from agents.rewriter.agent import RewriterAgent
+from agents.fetcher.agent import FetcherAgent
 from gateway.router import Router
 from memory.session import SessionMemory
 from memory.project import ProjectMemory
@@ -57,6 +59,8 @@ AGENTS = {
     "publisher": PublisherAgent,
     "monitor": MonitorAgent,
     "approval": ApprovalAgent,
+    "rewriter": RewriterAgent,
+    "fetcher": FetcherAgent,
 }
 
 
@@ -109,6 +113,10 @@ async def run_workflow(
     session.set("workflow_id", workflow_id)
     for k, v in input_data.items():
         session.set(k, v)
+
+    # Ensure language is always set to Indonesian by default
+    if not session.get("language"):
+        session.set("language", "id")
 
     # Init router
     providers_config = load_config(os.path.join(ROOT, "config", "providers.yaml"))
@@ -269,8 +277,15 @@ Examples:
 
     # Run command
     run_parser = sub.add_parser("run", help="Run a workflow")
-    run_parser.add_argument("workflow", help="Workflow name (e.g. seo_article)")
-    run_parser.add_argument("--keyword", "-k", required=True, help="Target keyword")
+    run_parser.add_argument("workflow", help="Workflow name (e.g. seo_article, rewrite_article)")
+    run_parser.add_argument("--keyword", "-k", required=True,
+                            help="Target keyword OR source URL (for rewrite_article)")
+    run_parser.add_argument("--target-keyword", default="",
+                            help="[rewrite] Override detected keyword")
+    run_parser.add_argument("--extra-context", default="",
+                            help="[rewrite] Extra data: brand voice, real cases, insights")
+    run_parser.add_argument("--language", default="id", choices=["id", "en"],
+                            help="Output language: id=Indonesian (default), en=English")
     run_parser.add_argument("--dry-run", action="store_true", help="Print plan without executing")
     run_parser.add_argument("--verbose", "-v", action="store_true", help="Debug logging")
 
@@ -296,27 +311,186 @@ Examples:
             print(f"Workflow not found: {workflow_path}")
             sys.exit(1)
 
-        input_data = {"keyword": args.keyword}
+        input_data = {
+            "keyword": args.keyword,
+            "target_keyword": getattr(args, "target_keyword", ""),
+            "extra_context": getattr(args, "extra_context", ""),
+            "language": getattr(args, "language", "id"),
+        }
 
         result = asyncio.run(run_workflow(workflow_path, input_data, dry_run=args.dry_run))
 
-        # Print summary
+        # ── Summary header ──────────────────────────────────────────
         print("\n" + "=" * 60)
-        print(f"WORKFLOW RESULT: {result['workflow']}")
-        print(f"Status: {result['status']}")
-        print(f"Steps: {result['steps_completed']}/{result['steps_total']} completed")
+        print(f"WORKFLOW RESULT : {result['workflow']}")
+        print(f"Status          : {result['status'].upper()}")
+        print(f"Steps           : {result['steps_completed']}/{result['steps_total']} completed")
+        print(f"Tokens used     : {result.get('total_tokens', 0)}")
+        print(f"Cost            : ${result.get('total_cost_usd', 0):.6f}")
         print("=" * 60)
 
-        # Print final output keys
+        # ── Per-step confidence ──────────────────────────────────────
+        print("\nStep results:")
+        for step in result.get("steps", []):
+            status_icon = "✓" if step.get("status") == "completed" else "✗"
+            conf = step.get("confidence", 0)
+            elapsed = step.get("elapsed_s", 0)
+            print(f"  {status_icon} [{step['step_id']:12s}] {step['agent']:12s}  "
+                  f"confidence={conf:.2f}  {elapsed:.1f}s")
+            if step.get("error"):
+                print(f"    ERROR: {step['error']}")
+
+        # ── Extract article content ──────────────────────────────────
         final = result.get("final_output", {})
-        if final:
-            print("\nFinal outputs:")
-            for step_id, data in final.items():
-                if isinstance(data, dict):
-                    print(f"  [{step_id}]")
-                    for k, v in data.items():
-                        val_str = str(v)[:100]
-                        print(f"    {k}: {val_str}")
+
+        # Find the best content source — rewrite > seo > write
+        article_title = ""
+        article_content = ""
+        article_excerpt = ""
+        meta_desc = ""
+        quality_score = 0
+        approved = False
+        is_rewrite = "rewrite" in final
+
+        # Rewrite workflow output
+        rewrite_data = final.get("rewrite", {})
+        if isinstance(rewrite_data, dict) and rewrite_data.get("content"):
+            article_title = rewrite_data.get("title", "")
+            article_content = rewrite_data.get("content", "")
+            article_excerpt = rewrite_data.get("excerpt", "")
+            meta_desc = rewrite_data.get("meta_description", "")
+
+        # Standard SEO workflow output
+        for step_key in ("seo", "write", "writer"):
+            data = final.get(step_key, {})
+            if isinstance(data, dict):
+                article_title = article_title or data.get("meta_title") or data.get("title", "")
+                article_content = article_content or data.get("optimized_content") or data.get("content", "")
+                article_excerpt = article_excerpt or data.get("excerpt", "")
+                meta_desc = meta_desc or data.get("meta_description", "")
+
+        review_data = final.get("review", {})
+        if isinstance(review_data, dict):
+            quality_score = review_data.get("quality_score", 0)
+            approved = review_data.get("approved", False)
+
+        # ── Print rewrite diagnosis if available ──────────────────────
+        if is_rewrite and isinstance(rewrite_data, dict):
+            diag = rewrite_data.get("diagnosis", {})
+            src_diag = diag.get("source_diagnosis", {})
+            aeo_before = rewrite_data.get("aeo_readiness_score_before", 0)
+            if src_diag or aeo_before:
+                print("\n" + "─" * 60)
+                print("DIAGNOSIS ARTIKEL SUMBER")
+                print("─" * 60)
+                if aeo_before:
+                    print(f"  AEO Readiness Score (sebelum): {aeo_before}/100")
+                weaknesses = src_diag.get("top_weaknesses", [])
+                if weaknesses:
+                    print("  Kelemahan yang diperbaiki:")
+                    for i, w in enumerate(weaknesses[:5], 1):
+                        print(f"    {i}. {w}")
+                rw_diag = diag.get("rewrite_diagnosis", {})
+                angle = rw_diag.get("reframe_angle", "")
+                if angle:
+                    print(f"  Angle baru: {angle}")
+                print("─" * 60)
+
+        # ── Print article to terminal ────────────────────────────────
+        if article_content:
+            print("\n" + "=" * 60)
+            print("ARTIKEL YANG DIHASILKAN")
+            print("=" * 60)
+            if article_title:
+                print(f"JUDUL: {article_title}")
+                print("-" * 60)
+            print(article_content)
+            if article_excerpt:
+                print("\n" + "-" * 60)
+                print(f"EXCERPT: {article_excerpt}")
+            if meta_desc:
+                print(f"META DESC: {meta_desc}")
+            if quality_score:
+                print(f"\nQUALITY SCORE: {quality_score}/100  |  "
+                      f"APPROVED: {'✓ Yes' if approved else '✗ No'}")
+
+            # ── Print SEO metadata block for rewrite ─────────────────
+            if is_rewrite and isinstance(rewrite_data, dict):
+                seo_meta = rewrite_data.get("seo_metadata", {})
+                int_links = rewrite_data.get("internal_links", {})
+                if seo_meta:
+                    print("\n" + "─" * 60)
+                    print("SEO METADATA")
+                    print("─" * 60)
+                    priority_keys = [
+                        "meta_title", "meta_description", "focus_keyword",
+                        "secondary_keywords", "slug", "estimated_read_time",
+                        "word_count", "featured_snippet_target", "schema_markup"
+                    ]
+                    for k in priority_keys:
+                        v = seo_meta.get(k)
+                        if v:
+                            print(f"  {k}: {str(v)[:120]}")
+                if int_links:
+                    print("\n" + "─" * 60)
+                    print("INTERNAL LINK RECOMMENDATIONS")
+                    print("─" * 60)
+                    inbound = int_links.get("inbound_recommendations", [])
+                    if inbound:
+                        print("  Inbound (artikel lain → artikel ini):")
+                        for l in inbound[:3]:
+                            print(f"    - {l.get('topic','')} | anchor: {l.get('anchor_text','')}")
+                    outbound = int_links.get("outbound_recommendations", [])
+                    if outbound:
+                        print("  Outbound (artikel ini → artikel lain):")
+                        for l in outbound[:3]:
+                            print(f"    - {l.get('topic','')} | anchor: {l.get('anchor_text','')}")
+
+            print("=" * 60)
+
+            # ── Save article to file ─────────────────────────────────
+            import re as _re
+            # For rewrite, use source URL domain as filename prefix
+            if is_rewrite:
+                src_url = final.get("fetch", {}).get("url", args.keyword)
+                domain = _re.sub(r"https?://(www\.)?", "", src_url).split("/")[0]
+                safe_kw = _re.sub(r"[^\w-]", "_", domain)[:30]
+            else:
+                safe_kw = _re.sub(r"[^\w\s-]", "", args.keyword).strip().replace(" ", "_")[:40]
+
+            out_dir = os.path.join(ROOT, "output")
+            os.makedirs(out_dir, exist_ok=True)
+            out_file = os.path.join(out_dir, f"{safe_kw}_{result['workflow_id']}.md")
+
+            with open(out_file, "w", encoding="utf-8") as f:
+                if article_title:
+                    f.write(f"# {article_title}\n\n")
+                if meta_desc:
+                    f.write(f"**Meta:** {meta_desc}\n\n")
+                if article_excerpt:
+                    f.write(f"**Excerpt:** {article_excerpt}\n\n")
+                f.write("---\n\n")
+                f.write(article_content)
+
+                # Append SEO metadata & internal links for rewrite
+                if is_rewrite and isinstance(rewrite_data, dict):
+                    seo_meta = rewrite_data.get("seo_metadata", {})
+                    int_links = rewrite_data.get("internal_links", {})
+                    if seo_meta:
+                        f.write("\n\n---\n\n## SEO Metadata\n\n")
+                        for k, v in seo_meta.items():
+                            if v:
+                                f.write(f"- **{k}**: {v}\n")
+                    if int_links:
+                        f.write("\n\n---\n\n## Internal Link Recommendations\n\n")
+                        f.write(json.dumps(int_links, ensure_ascii=False, indent=2))
+
+                f.write(f"\n\n---\n")
+                f.write(f"*Quality: {quality_score}/100 | Workflow: {result['workflow_id']}*\n")
+
+            print(f"\nArtikel disimpan: {out_file}")
+        else:
+            print("\n[INFO] Tidak ada konten artikel dalam output workflow.")
 
 
 if __name__ == "__main__":
