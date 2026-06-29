@@ -27,3 +27,6 @@ config/longterm_memory.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Test scripts (temporary)
+test_*.py
