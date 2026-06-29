@@ -1,0 +1,31 @@
+providers:
+  huggingface:
+    name: huggingface
+    base_url: https://api-inference.huggingface.co/models
+    api_key_env: HF_API_TOKEN
+    default_model: Qwen/Qwen2.5-72B-Instruct
+    timeout: 60.0
+    models:
+      default: Qwen/Qwen2.5-72B-Instruct
+      fast: Qwen/Qwen2.5-7B-Instruct
+
+  ollama:
+    name: ollama
+    base_url: http://localhost:11434
+    default_model: llama3.1:8b
+    timeout: 120.0
+    models:
+      default: llama3.1:8b
+      fast: llama3.1:8b
+
+fallback_order:
+  - huggingface
+  - ollama
+
+cache:
+  enabled: true
+  ttl_seconds: 3600
+  cache_dir: cache
+
+rate_limit:
+  rpm: 30

@@ -1,0 +1,37 @@
+name: simple_article
+version: "1.0"
+description: "Quick article generation - keyword to write to review"
+provider: huggingface
+model: Qwen/Qwen2.5-72B-Instruct
+
+steps:
+  - id: plan
+    agent: planner
+    description: "Create outline from keyword"
+    input_mapping:
+      keyword: "${input.keyword}"
+    output_keys:
+      - outline
+      - sections
+
+  - id: write
+    agent: writer
+    description: "Write article based on outline"
+    input_mapping:
+      outline: "${steps.plan.outline}"
+      sections: "${steps.plan.sections}"
+      keyword: "${input.keyword}"
+    output_keys:
+      - title
+      - content
+
+  - id: review
+    agent: reviewer
+    description: "Quick quality review"
+    input_mapping:
+      content: "${steps.write.content}"
+      title: "${steps.write.title}"
+    output_keys:
+      - quality_score
+      - approved
+      - feedback

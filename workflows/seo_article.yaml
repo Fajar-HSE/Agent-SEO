@@ -1,0 +1,79 @@
+name: seo_article_generation
+version: "1.0"
+description: "Generate SEO-optimized article from keyword"
+provider: huggingface
+model: Qwen/Qwen2.5-72B-Instruct
+
+steps:
+  - id: keyword
+    agent: keyword
+    description: "Research and select target keywords"
+    input_mapping:
+      keyword: "${input.keyword}"
+    output_keys:
+      - primary_keyword
+      - secondary_keywords
+      - search_intent
+
+  - id: research
+    agent: research
+    description: "Research topic context and trends"
+    input_mapping:
+      keyword: "${input.keyword}"
+      outline: "${steps.keyword.primary_keyword}"
+    output_keys:
+      - context
+      - trends
+      - key_facts
+
+  - id: plan
+    agent: planner
+    description: "Create detailed article outline"
+    input_mapping:
+      keyword: "${input.keyword}"
+      keywords: "${steps.keyword}"
+      context: "${steps.research.context}"
+    output_keys:
+      - outline
+      - sections
+      - target_length
+
+  - id: write
+    agent: writer
+    description: "Write full article content"
+    input_mapping:
+      outline: "${steps.plan.outline}"
+      sections: "${steps.plan.sections}"
+      keywords: "${steps.keyword}"
+      context: "${steps.research.context}"
+    output_keys:
+      - title
+      - content
+      - excerpt
+
+  - id: seo
+    agent: seo
+    description: "Optimize content for search engines"
+    input_mapping:
+      content: "${steps.write.content}"
+      title: "${steps.write.title}"
+      keywords: "${steps.keyword}"
+    output_keys:
+      - optimized_content
+      - meta_title
+      - meta_description
+      - seo_score
+
+  - id: review
+    agent: reviewer
+    description: "Review quality and SEO compliance"
+    input_mapping:
+      content: "${steps.seo.optimized_content}"
+      title: "${steps.seo.meta_title}"
+      seo_score: "${steps.seo.seo_score}"
+      keyword: "${input.keyword}"
+    output_keys:
+      - quality_score
+      - approved
+      - feedback
+      - issues

@@ -1,0 +1,23 @@
+{
+  "brand_voice": {
+    "tone": "professional",
+    "style": "informative",
+    "language": "id"
+  },
+  "seo_rules": {
+    "min_word_count": 1000,
+    "max_keyword_density": 2.5,
+    "require_meta_description": true,
+    "require_headings": true
+  },
+  "sop": {
+    "content_creation": [
+      "Research keyword and context",
+      "Create outline",
+      "Write content",
+      "Optimize for SEO",
+      "Review quality",
+      "Publish"
+    ]
+  }
+}
