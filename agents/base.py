@@ -66,7 +66,16 @@ class BaseAgent(ABC):
         if self.config.prompt_file:
             path = self.config.prompt_file
             if not os.path.isabs(path):
-                path = os.path.join(_ROOT, path)
+                path = os.path.abspath(os.path.join(_ROOT, path))
+            else:
+                path = os.path.abspath(path)
+            
+            # Prevent Path Traversal
+            project_root = os.path.abspath(_ROOT)
+            if not path.startswith(project_root):
+                logger.warning(f"Blocked path traversal attempt: {path}")
+                return ""
+                
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     return f.read()
@@ -75,12 +84,14 @@ class BaseAgent(ABC):
 
         # 2. Convention-based: prompts/<name>.txt
         name = self.prompt_name or (self.config.name.lower())
-        convention_path = os.path.join(_ROOT, "prompts", f"{name}.txt")
-        if os.path.exists(convention_path):
+        convention_path = os.path.abspath(os.path.join(_ROOT, "prompts", f"{name}.txt"))
+        project_root = os.path.abspath(_ROOT)
+        if convention_path.startswith(project_root) and os.path.exists(convention_path):
             with open(convention_path, "r", encoding="utf-8") as f:
                 return f.read()
 
         return ""
+
 
     # ------------------------------------------------------------------
     # Input / output helpers
@@ -229,6 +240,10 @@ class BaseAgent(ABC):
             warnings = self._check_output(result)
             if warnings:
                 result["_warnings"] = warnings
+                # Redact PII in final result if output guard is active
+                guard = self._get_output_guard()
+                if guard:
+                    result = guard.redact_pii_in_dict(result)
 
             logger.info(f"[{self.config.name}] Completed — confidence: {confidence:.2f}")
             return result

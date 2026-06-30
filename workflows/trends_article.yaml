@@ -1,0 +1,143 @@
+name: trends_article_generation
+version: "1.0"
+description: "Pipeline generating SEO articles from trending topics: trends -> select_topic -> keyword -> research -> plan -> write -> SEO -> review -> approval -> publish -> monitor"
+provider: huggingface
+model: Qwen/Qwen2.5-7B-Instruct
+
+steps:
+  - id: scrape_trends
+    agent: trends
+    description: "Scrape current trending topics from Google Trends & Google News RSS"
+    input_mapping:
+      source: "both"
+      geo: "ID"
+    output_keys:
+      - topics
+
+  - id: select_topic
+    agent: topic_selector
+    description: "Select a trending topic for the article"
+    input_mapping:
+      topics: "${steps.scrape_trends.topics}"
+    output_keys:
+      - keyword
+      - selected_topic
+
+  - id: keyword
+    agent: keyword
+    description: "Research and select target keywords"
+    input_mapping:
+      keyword: "${steps.select_topic.keyword}"
+    output_keys:
+      - primary_keyword
+      - secondary_keywords
+      - search_intent
+
+  - id: research
+    agent: research
+    description: "Research topic context and trends"
+    input_mapping:
+      keyword: "${steps.select_topic.keyword}"
+      primary_keyword: "${steps.keyword.primary_keyword}"
+    output_keys:
+      - context
+      - trends
+      - key_facts
+
+  - id: plan
+    agent: planner
+    description: "Create detailed article outline"
+    input_mapping:
+      keyword: "${steps.select_topic.keyword}"
+      keywords: "${steps.keyword}"
+      context: "${steps.research.context}"
+    output_keys:
+      - outline
+      - sections
+      - target_length
+
+  - id: write
+    agent: writer
+    description: "Write full article content"
+    input_mapping:
+      outline: "${steps.plan.outline}"
+      sections: "${steps.plan.sections}"
+      keywords: "${steps.keyword}"
+      context: "${steps.research.context}"
+      key_facts: "${steps.research.key_facts}"
+    output_keys:
+      - title
+      - content
+      - excerpt
+
+  - id: seo
+    agent: seo
+    description: "Optimize content for search engines"
+    input_mapping:
+      content: "${steps.write.content}"
+      title: "${steps.write.title}"
+      excerpt: "${steps.write.excerpt}"
+      keywords: "${steps.keyword}"
+    output_keys:
+      - optimized_content
+      - meta_title
+      - meta_description
+      - seo_score
+
+  - id: review
+    agent: reviewer
+    description: "Review quality and SEO compliance"
+    input_mapping:
+      content: "${steps.seo.optimized_content}"
+      title: "${steps.seo.meta_title}"
+      seo_score: "${steps.seo.seo_score}"
+      keyword: "${steps.select_topic.keyword}"
+      key_facts: "${steps.research.key_facts}"
+    output_keys:
+      - quality_score
+      - approved
+      - feedback
+      - issues
+
+  - id: approval
+    agent: approval
+    description: "Human approval checkpoint before publishing"
+    input_mapping:
+      title: "${steps.seo.meta_title}"
+      optimized_content: "${steps.seo.optimized_content}"
+      quality_score: "${steps.review.quality_score}"
+      approved: "${steps.review.approved}"
+      feedback: "${steps.review.feedback}"
+      issues: "${steps.review.issues}"
+    output_keys:
+      - approved
+      - action
+      - reason
+
+  - id: publish
+    agent: publisher
+    description: "Publish approved article to WordPress"
+    input_mapping:
+      title: "${steps.seo.meta_title}"
+      content: "${steps.seo.optimized_content}"
+      excerpt: "${steps.write.excerpt}"
+      meta_title: "${steps.seo.meta_title}"
+      meta_description: "${steps.seo.meta_description}"
+      publish_status: "draft"
+    output_keys:
+      - published
+      - post_id
+      - url
+      - status
+
+  - id: monitor
+    agent: monitor
+    description: "Record workflow metrics and health report"
+    input_mapping:
+      workflow_id: "${input.workflow_id}"
+      steps_results: "${input.steps_results}"
+    output_keys:
+      - health
+      - total_tokens
+      - total_cost_usd
+      - avg_confidence

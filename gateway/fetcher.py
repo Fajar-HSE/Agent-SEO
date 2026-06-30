@@ -22,6 +22,45 @@ _HEADERS = {
 }
 
 
+from urllib.parse import urlparse
+import socket
+
+def _is_safe_url(url: str) -> bool:
+    """Validate URL to prevent SSRF by blocking local/private IP ranges."""
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+            
+        hostname_lower = hostname.lower()
+        if hostname_lower in ("localhost", "127.0.0.1", "::1"):
+            return False
+            
+        # Resolve to IP to check for private ranges
+        ip = socket.gethostbyname(hostname)
+        ip_parts = list(map(int, ip.split('.')))
+        
+        if len(ip_parts) != 4:
+            return False
+            
+        # RFC 1918 private ranges & Loopback & Link-local
+        if (
+            ip_parts[0] == 10 or
+            (ip_parts[0] == 172 and 16 <= ip_parts[1] <= 31) or
+            (ip_parts[0] == 192 and ip_parts[1] == 168) or
+            (ip_parts[0] == 169 and ip_parts[1] == 254) or
+            ip_parts[0] == 127
+        ):
+            return False
+        return True
+    except Exception:
+        return False
+
+
 class WebFetcher:
     """Fetches article content from a URL and returns clean text."""
 
@@ -38,6 +77,11 @@ class WebFetcher:
           headings (list), status_code, error (if any)
         """
         logger.info(f"Fetching: {url}")
+        
+        if not _is_safe_url(url):
+            logger.warning(f"Blocked potential SSRF attempt for URL: {url}")
+            return {"url": url, "error": "URL target ditolak karena alasan keamanan (SSRF Protection)", "content": ""}
+
         try:
             async with httpx.AsyncClient(
                 timeout=self.timeout,

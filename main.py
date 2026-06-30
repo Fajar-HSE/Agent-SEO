@@ -41,6 +41,8 @@ from agents.monitor.agent import MonitorAgent
 from agents.approval.agent import ApprovalAgent
 from agents.rewriter.agent import RewriterAgent
 from agents.fetcher.agent import FetcherAgent
+from agents.trends.agent import TrendsAgent
+from agents.topic_selector.agent import TopicSelectorAgent
 from gateway.router import Router
 from memory.session import SessionMemory
 from memory.project import ProjectMemory
@@ -61,6 +63,8 @@ AGENTS = {
     "approval": ApprovalAgent,
     "rewriter": RewriterAgent,
     "fetcher": FetcherAgent,
+    "trends": TrendsAgent,
+    "topic_selector": TopicSelectorAgent,
 }
 
 
@@ -99,6 +103,7 @@ async def run_workflow(
     workflow_path: str,
     input_data: dict[str, Any],
     dry_run: bool = False,
+    step_callback=None,
 ):
     """Execute a workflow from YAML definition."""
     # Load workflow config
@@ -147,6 +152,12 @@ async def run_workflow(
         description = step.get("description", "")
 
         logger.info(f"[Step {i+1}/{len(steps)}] {step_id} — {agent_name}: {description}")
+        
+        if step_callback:
+            try:
+                await step_callback(step_id, agent_name, "running", i + 1, len(steps), description)
+            except Exception as cb_err:
+                logger.error(f"Callback error: {cb_err}")
 
         if dry_run:
             logger.info(f"  [DRY RUN] Skipping execution")
@@ -190,6 +201,12 @@ async def run_workflow(
             })
 
             logger.info(f"  ✓ Completed in {elapsed:.1f}s — confidence: {result.get('confidence', 0):.2f}")
+            
+            if step_callback:
+                try:
+                    await step_callback(step_id, agent_name, "completed", i + 1, len(steps), result)
+                except Exception as cb_err:
+                    logger.error(f"Callback error: {cb_err}")
 
             # If approval step rejected — stop the workflow
             if agent_name == "approval" and not result.get("approved", True):
@@ -212,6 +229,13 @@ async def run_workflow(
                 "status": "failed",
                 "error": str(e),
             })
+            
+            if step_callback:
+                try:
+                    await step_callback(step_id, agent_name, "failed", i + 1, len(steps), str(e))
+                except Exception as cb_err:
+                    logger.error(f"Callback error: {cb_err}")
+
 
     # Final summary
     completed = sum(1 for s in steps_results if s.get("status") == "completed")

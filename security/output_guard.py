@@ -80,6 +80,29 @@ class OutputGuard:
                 found.append(match.group(0))
         return found
 
+    def redact_pii_in_dict(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Recursively redact PII in a dictionary/list/string structure."""
+        if not self.detect_pii:
+            return data
+
+        if isinstance(data, str):
+            redacted = data
+            for pii_type, pattern in self._pii_compiled.items():
+                if pii_type == "email":
+                    redacted = pattern.sub("[EMAIL_REDANTED]", redacted)
+                elif pii_type == "phone_id":
+                    redacted = pattern.sub("[PHONE_REDANTED]", redacted)
+                elif pii_type == "nik":
+                    redacted = pattern.sub("[NIK_REDANTED]", redacted)
+                elif pii_type == "credit_card":
+                    redacted = pattern.sub("[CARD_REDANTED]", redacted)
+            return redacted
+        elif isinstance(data, dict):
+            return {k: self.redact_pii_in_dict(v) for k, v in data.items()}
+        elif isinstance(data, list):
+            return [self.redact_pii_in_dict(item) for item in data]
+        return data
+
     def validate_output(self, output: dict[str, Any]) -> tuple[bool, list[str]]:
         """
         Full output validation. Returns (is_valid, list_of_warnings).
@@ -96,7 +119,7 @@ class OutputGuard:
         # PII check
         pii_found = self.detect_pii_in_text(full_text)
         if pii_found:
-            warnings.append(f"PII detected in output: {', '.join(pii_found)}")
+            warnings.append(f"PII detected in output: {', '.join(pii_found)} (Redacting in final output)")
 
         # Hallucination check
         signals = self.check_hallucination_signals(full_text)
@@ -104,3 +127,4 @@ class OutputGuard:
             warnings.append(f"Possible hallucination signals: {signals[:2]}")
 
         return True, warnings
+

@@ -18,8 +18,8 @@ class WriterAgent(BaseAgent):
         raw = await llm_func(
             messages=messages,
             model=self.config.model,
-            temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens,
+            temperature=0.75,        # sedikit kreatif untuk hook & variasi kalimat
+            max_tokens=6000,         # artikel panjang 1500-2000 kata
         )
         parsed = self._parse_output(raw)
 
@@ -35,7 +35,9 @@ class WriterAgent(BaseAgent):
 
         return {
             "title": parsed.get("title", ""),
+            "meta_description": parsed.get("meta_description", ""),
             "content": content,
             "excerpt": parsed.get("excerpt", ""),
             "word_count": parsed.get("word_count", len(content.split()) if content else 0),
+            "internal_links": parsed.get("internal_links", []),
         }
