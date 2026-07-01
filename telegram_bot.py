@@ -15,6 +15,9 @@ try:
 except ImportError:
     pass
 
+# Force non-blocking headless mode for bot operations
+os.environ["NO_HUMAN_APPROVAL"] = "1"
+
 # Ensure SEO Agent imports work
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
@@ -47,6 +50,9 @@ import hashlib
 # Penyimpanan judul topik: {hash_key: topic_title}
 # Digunakan agar callback_data tetap pendek (max 64 byte)
 TOPIC_STORE = {}
+
+# Strong references to running background tasks to prevent garbage collection mid-execution
+RUNNING_TASKS = set()
 
 
 async def send_message_with_keyboard(chat_id: int, text: str, keyboard: list, reply_to_message_id: int = None) -> dict:
@@ -281,7 +287,9 @@ async def handle_command(chat_id: int, text: str, user_id: int, username: str, m
         )
 
         # Execute the workflow asynchronously in the background
-        asyncio.create_task(execute_and_report(chat_id, workflow, workflow_path, keyword, msg_id))
+        task = asyncio.create_task(execute_and_report(chat_id, workflow, workflow_path, keyword, msg_id))
+        RUNNING_TASKS.add(task)
+        task.add_done_callback(RUNNING_TASKS.discard)
 
     else:
         await send_message(chat_id, "❓ Perintah tidak dikenal. Ketik <code>/start</code> untuk bantuan.", msg_id)
@@ -436,7 +444,7 @@ async def main_loop():
     async with httpx.AsyncClient(timeout=30.0) as client:
         while True:
             try:
-                url = f"{API_URL}/getUpdates?offset={offset}&timeout=20"
+                url = f"{API_URL}/getUpdates?offset={offset}&timeout=20&allowed_updates=%5B%22message%22,%22callback_query%22%5D"
                 resp = await client.get(url)
                 
                 if resp.status_code != 200:
@@ -516,7 +524,9 @@ async def main_loop():
                                     f"🔑 <b>Kata Kunci (Tren):</b> <code>{escape_html(topic_title)}</code>\n\n"
                                     f"Mohon tunggu, proses sedang berjalan..."
                                 )
-                                asyncio.create_task(execute_and_report(chat_id, workflow_name, workflow_path, topic_title, None))
+                                task = asyncio.create_task(execute_and_report(chat_id, workflow_name, workflow_path, topic_title, None))
+                                RUNNING_TASKS.add(task)
+                                task.add_done_callback(RUNNING_TASKS.discard)
                             except Exception as ex:
                                 logger.exception("Error processing confirm run")
                                 await answer_callback_query(cb_id, f"❌ Error: {str(ex)[:50]}")
@@ -541,9 +551,11 @@ async def main_loop():
                     logger.info(f"Received message from @{username} ({user_id}): {text}")
                     
                     # Handle the command asynchronously
-                    asyncio.create_task(
+                    task = asyncio.create_task(
                         handle_command(chat_id, text, user_id, username, msg_id)
                     )
+                    RUNNING_TASKS.add(task)
+                    task.add_done_callback(RUNNING_TASKS.discard)
                     
             except httpx.RequestError as e:
                 logger.warning(f"Network error in polling loop: {e}")
