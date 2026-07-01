@@ -486,15 +486,22 @@ Examples:
             os.makedirs(out_dir, exist_ok=True)
             out_file = os.path.join(out_dir, f"{safe_kw}_{result['workflow_id']}.md")
 
+            # Clean and format the content if it's trapped in JSON format
+            clean_content = article_content
+            # Remove escaped newlines if any
+            if isinstance(clean_content, str):
+                if "\\n" in clean_content:
+                    clean_content = clean_content.replace("\\n", "\n")
+
             with open(out_file, "w", encoding="utf-8") as f:
                 if article_title:
-                    f.write(f"# {article_title}\n\n")
+                    f.write(f"# {article_title.strip()}\n\n")
                 if meta_desc:
-                    f.write(f"**Meta:** {meta_desc}\n\n")
+                    f.write(f"**Meta Description:** {meta_desc.strip()}\n\n")
                 if article_excerpt:
-                    f.write(f"**Excerpt:** {article_excerpt}\n\n")
+                    f.write(f"**Excerpt:** {article_excerpt.strip()}\n\n")
                 f.write("---\n\n")
-                f.write(article_content)
+                f.write(clean_content.strip())
 
                 # Append SEO metadata & internal links for rewrite
                 if is_rewrite and isinstance(rewrite_data, dict):
@@ -510,9 +517,9 @@ Examples:
                         f.write(json.dumps(int_links, ensure_ascii=False, indent=2))
 
                 f.write(f"\n\n---\n")
-                f.write(f"*Quality: {quality_score}/100 | Workflow: {result['workflow_id']}*\n")
+                f.write(f"*Quality Score: {quality_score}/100 | Workflow ID: {result['workflow_id']}*\n")
 
-            print(f"\nArtikel disimpan: {out_file}")
+            print(f"\nArtikel disimpan dalam format clean Markdown (.md) yang rapi di: {out_file}")
         else:
             print("\n[INFO] Tidak ada konten artikel dalam output workflow.")
 
